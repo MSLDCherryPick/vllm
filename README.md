@@ -14,6 +14,8 @@ Easy, fast, and cheap LLM serving for everyone
 </p>
 
 ---
+[2025/03] Add Hacked classifier free guidance (CFG) method for [YuE](https://github.com/multimodal-art-projection/YuE/tree/vllm) Music generation project
+
 
 [2025/03] We are collaborating with Ollama to host an [Inference Night](https://lu.ma/vllm-ollama) at Y Combinator in San Francisco on Thursday, March 27, at 6 PM. Discuss all things inference local or data center!
 
@@ -22,7 +24,7 @@ Easy, fast, and cheap LLM serving for everyone
 ---
 
 *Latest News* 🔥
-
+- [2025/03] Add Hacked classifier free guidance (CFG) method for [YuE](https://github.com/multimodal-art-projection/YuE/tree/vllm) Music generation project
 - [2025/03] We hosted [the first vLLM China Meetup](https://mp.weixin.qq.com/s/n77GibL2corAtQHtVEAzfg)! Please find the meetup slides from vLLM team [here](https://docs.google.com/presentation/d/1REHvfQMKGnvz6p3Fd23HhSO4c8j5WPGZV0bKYLwnHyQ/edit?usp=sharing).
 - [2025/03] We hosted [the East Coast vLLM Meetup](https://lu.ma/7mu4k4xx)! Please find the meetup slides [here](https://docs.google.com/presentation/d/1NHiv8EUFF1NLd3fEYODm56nDmL26lEeXCaDgyDlTsRs/edit#slide=id.g31441846c39_0_0).
 - [2025/02] We hosted [the ninth vLLM meetup](https://lu.ma/h7g3kuj9) with Meta! Please find the meetup slides from vLLM team [here](https://docs.google.com/presentation/d/1jzC_PZVXrVNSFVCW-V4cFXb6pn7zZ2CyP_Flwo05aqg/edit?usp=sharing) and AMD [here](https://drive.google.com/file/d/1Zk5qEJIkTmlQ2eQcXQZlljAx3m9s7nwn/view?usp=sharing). The slides from Meta will not be posted.
@@ -47,6 +49,81 @@ Easy, fast, and cheap LLM serving for everyone
 - [2023/06] We officially released vLLM! FastChat-vLLM integration has powered [LMSYS Vicuna and Chatbot Arena](https://chat.lmsys.org) since mid-April. Check out our [blog post](https://vllm.ai).
 
 </details>
+
+## (Hacked) Classifier Free Guidance
+Currently we only support inference **batch_size=1**
+Modified
+```
+# <Set you sampling parameters>
+sampling_params = SamplingParams(
+            ...
+            guidance_scale=1.5 # Classifier Free Guidance Scale
+            ...
+        )
+
+# < Set your model >
+# Use an additional batch sample as unconditional prompt
+
+output = model.generate(
+            prompt_token_ids=[input_ids, [<Your Start Token>]],
+            sampling_params=sampling_params,
+            )
+output = list(batch_output[0].outputs[0].token_ids)
+```
+
+We hacked the sampling procedure of in 
+- **vllm V0**: vllm/model_executor/layers/sampler.py
+- **vllm V1**: vllm/v1/sample/sampler.py
+```
+ def forward(
+        self,
+        logits: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> Optional[SamplerOutput]:
+        """
+        Single-step scheduling:
+        * Perform GPU-side sampling computation & compute
+          GPU-side logprobs tensor
+        * Pythonize sampling result & logprobs tensor
+
+        Multi-step scheduling:
+        * Perform GPU-side sampling computation & compute
+          GPU-side logprobs tensor
+        * Defer Pythonization of sampling result & logprobs
+          tensor
+        * Encapsulate arguments required for deferred Pythonization
+          in the :class:`SamplerOutput` structure
+
+        Args:
+            logits: (num_tokens, vocab_size).
+            sampling_metadata: Metadata for sampling.
+        """
+        # Jianwei Yu CFG debug
+        if sampling_metadata.seq_groups[0].sampling_params.guidance_scale:
+            if sampling_metadata.seq_groups[0].sampling_params.guidance_scale != 1.0:
+                print("Guidance scale is not 1.0, processing logits")
+                print("Guidance scale: {}".format(sampling_metadata.seq_groups[0].sampling_params.guidance_scale))
+                if logits.shape[0] == 2 and logits.ndim == 2:
+                    logits = logits.to(torch.float32)
+                    scores = torch.nn.functional.log_softmax(logits, dim=-1)
+                    scores_processed = (sampling_metadata.seq_groups[0].sampling_params.guidance_scale * (scores[0] - scores[1]) + scores[1])
+                    scores_processed = torch.stack([scores_processed.clone(), scores_processed.clone()])
+                    def logits_processor_stage1(logits):
+                        blocked_token_ids = list(range(0, 32002))+[32016]
+                        logits[:,blocked_token_ids] = -float("inf")
+                        return logits
+                    
+                    logits = scores_processed
+                    logits = logits_processor_stage1(logits)
+                    
+                else:
+                    print("Warning: logits shape is not 2, the dim is {}".format(logits.shape[0]))
+
+
+        assert logits is not None
+        _, vocab_size = logits.shape
+```
+
 
 ---
 ## About

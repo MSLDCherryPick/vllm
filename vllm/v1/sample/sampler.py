@@ -34,30 +34,27 @@ class Sampler(nn.Module):
         
         
         # Jianwei Yu CFG debug
-        # import pdb; pdb.set_trace()
+        if sampling_metadata.seq_groups[0].sampling_params.guidance_scale:
+            if sampling_metadata.seq_groups[0].sampling_params.guidance_scale != 1.0:
+                # print("Guidance scale is not 1.0, processing logits")
+                # print("Guidance scale: {}".format(sampling_metadata.seq_groups[0].sampling_params.guidance_scale))
+                if logits.shape[0] == 2 and logits.ndim == 2:
+                    # import pdb; pdb.set_trace()
+                    logits = logits.to(torch.float32)
+                    scores = torch.nn.functional.log_softmax(logits, dim=-1)
+                    scores_processed = (sampling_metadata.seq_groups[0].sampling_params.guidance_scale * (scores[0] - scores[1]) + scores[1])
+                    scores_processed = torch.stack([scores_processed.clone(), scores_processed.clone()])
 
-        if logits.shape[0] == 2 and logits.ndim == 2:
-            # dtype = logits.dtype
-            logits = logits.to(torch.float32)
-            # import pdb; pdb.set_trace()
-            scores = torch.nn.functional.log_softmax(logits, dim=-1)
-            scores_processed = (1.5 * (scores[0] - scores[1]) + scores[1])
-            scores_processed = torch.stack([scores_processed.clone(), scores_processed.clone()])
-        
-            # print(
-            #     "logits: {}".format(logits),
-            #     "logits type: {}".format(logits.dtype),
-            #     "scores_processed: {}".format(scores_processed),
-            #     "scores_processed type: {}".format(scores_processed.dtype),
-            #     "scores: {}".format(scores),
-            #     "scores type: {}".format(scores.dtype),
-            #     )
-            logits = scores_processed
-            # logits = logits.to(dtype)
-        else:
-            print("Warning: logits shape is not 2, the dim is {}".format(logits.shape[0]))
-        # Jianwei Yu CFG debug
-        # import pdb; pdb.set_trace()
+                    def logits_processor_stage1(logits):
+                        blocked_token_ids = list(range(0, 32002))+[32016]
+                        logits[:,blocked_token_ids] = -float("inf")
+                        return logits
+                    
+                    logits = scores_processed
+                    logits = logits_processor_stage1(logits)
+                    
+                else:
+                    print("Warning: logits shape is not 2, the dim is {}".format(logits.shape[0]))
 
         num_logprobs = sampling_metadata.max_num_logprobs
         if num_logprobs is not None:
