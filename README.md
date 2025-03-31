@@ -51,6 +51,12 @@ Easy, fast, and cheap LLM serving for everyone
 </details>
 
 ## (Hacked) Classifier Free Guidance
+### Installation
+```
+VLLM_USE_PRECOMPILED=1 pip install --editable .
+```
+
+### Introduction
 Currently we only support inference **batch_size=1**
 Modified
 ```
