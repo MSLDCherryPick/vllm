@@ -31,6 +31,34 @@ class Sampler(nn.Module):
         # is used for sampling (after penalties and temperature scaling).
         # TODO(rob): provide option for logprobs post sampling.
         # See https://vllm-dev.slack.com/archives/C07UUL8E61Z/p1735907856007919 # noqa: E501
+        
+        
+        # Jianwei Yu CFG debug
+        # import pdb; pdb.set_trace()
+
+        if logits.shape[0] == 2 and logits.ndim == 2:
+            # dtype = logits.dtype
+            logits = logits.to(torch.float32)
+            # import pdb; pdb.set_trace()
+            scores = torch.nn.functional.log_softmax(logits, dim=-1)
+            scores_processed = (1.5 * (scores[0] - scores[1]) + scores[1])
+            scores_processed = torch.stack([scores_processed.clone(), scores_processed.clone()])
+        
+            # print(
+            #     "logits: {}".format(logits),
+            #     "logits type: {}".format(logits.dtype),
+            #     "scores_processed: {}".format(scores_processed),
+            #     "scores_processed type: {}".format(scores_processed.dtype),
+            #     "scores: {}".format(scores),
+            #     "scores type: {}".format(scores.dtype),
+            #     )
+            logits = scores_processed
+            # logits = logits.to(dtype)
+        else:
+            print("Warning: logits shape is not 2, the dim is {}".format(logits.shape[0]))
+        # Jianwei Yu CFG debug
+        # import pdb; pdb.set_trace()
+
         num_logprobs = sampling_metadata.max_num_logprobs
         if num_logprobs is not None:
             raw_logprobs = self.compute_logprobs(logits)
@@ -87,12 +115,7 @@ class Sampler(nn.Module):
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> torch.Tensor:
-        """Sample logits based on sampling metadata.
-
-        The various logits processing functions called in this method
-        may update the logits tensor in-place.
-        """
-
+    
         assert not (sampling_metadata.all_greedy
                     and sampling_metadata.all_random)
         if sampling_metadata.all_random:
